@@ -1,0 +1,15 @@
+{
+  "name": "fronttend-docs",
+  "version": "0.0.1",
+  "description": "Frontend Docs",
+  "productName": "Frontend Docs",
+  "author": "Shirikov M. S.",
+  "scripts": {
+    "dev": "vitepress dev --port 8080",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "dependencies": {
+    "vitepress": "^1.6.4"
+  }
+}
