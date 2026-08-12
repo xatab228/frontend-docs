@@ -19,6 +19,7 @@ const levels = [
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
+  base: '/frontend-docs/',
   lang: 'ru-RU',
   title: "Frontend Docs",
   description: "База знаний по вопросам собеседований и требованиям к грейдам",
