@@ -1,8 +1,5 @@
 # JavaScript Developer — матрица компетенций (Vue track)
 
-> [Confluence](https://confluence.mts.ru/pages/viewpage.action?pageId=896804646) · Q1 2026 · **АКТУАЛЬНА**
-> Исключено: React, Angular · Senior = Junior + Middle + Senior
-
 ## Шкала грейдов
 
 | Колонка Confluence | Грейд |
