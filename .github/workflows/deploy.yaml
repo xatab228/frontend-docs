@@ -1,0 +1,72 @@
+# Пример рабочего процесса для создания и развёртывания сайта VitePress на GitHub Pages
+#
+name: Deploy VitePress site to Pages
+
+on:
+  # Выполняется при пушах, направленных в ветку `main`. Измените это значение на `master`, если вы
+  # используете ветку `master` в качестве ветки по умолчанию.
+  push:
+    branches: [master]
+
+  # Позволяет запустить этот рабочий процесс вручную на вкладке «Actions».
+  workflow_dispatch:
+
+# Устанавливает разрешения GITHUB_TOKEN, чтобы разрешить развёртывание на страницах GitHub.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Разрешите только одно одновременное развёртывание, пропуская запуски, стоящие в очереди.
+# Однако НЕ отменяйте текущие запуски, поскольку мы хотим дать возможность завершить производственные развёртывания.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # Сборка
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # Не требуется, если функция lastUpdated не включена
+      - uses: pnpm/action-setup@v4 # Раскомментируйте, если вы используете pnpm
+        with:
+          version: 9
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Cache VitePress
+        uses: actions/cache@v4
+        with:
+          path: .vitepress/cache
+          key: ${{ runner.os }}-vitepress-${{ hashFiles('./**', 'pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-vitepress-
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      - name: Install dependencies
+        run: pnpm install
+      - name: Build with VitePress
+        run: pnpm run build
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .vitepress/dist
+
+  # Развёртывание
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: build
+    runs-on: ubuntu-latest
+    name: Deploy
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
