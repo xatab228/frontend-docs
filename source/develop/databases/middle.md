@@ -11,6 +11,28 @@ UPDATE accounts SET balance = balance + 100 WHERE id = 2;
 COMMIT; -- если между этими шагами произойдёт сбой, вся транзакция откатится (Atomicity)
 ```
 
+На практике это выглядит так — реализация перевода средств между счетами с явной обработкой ошибок и откатом, применяющая атомарность из описания выше:
+
+```js
+// Node.js + pg (PostgreSQL)
+async function transferFunds(client, fromId, toId, amount) {
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      'SELECT balance FROM accounts WHERE id = $1 FOR UPDATE', [fromId] // блокировка строки
+    );
+    if (rows[0].balance < amount) throw new Error('Insufficient funds');
+
+    await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [amount, fromId]);
+    await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [amount, toId]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK'); // атомарность: откат при любой ошибке
+    throw err;
+  }
+}
+```
+
 ### Назначения и принципы ограничений (constraints)
 
 Ограничения (constraints) — правила на уровне схемы БД, гарантирующие целостность данных независимо от того, какое приложение и как их записывает. Основные виды: `NOT NULL` (значение обязательно), `UNIQUE` (значения в столбце не повторяются), `PRIMARY KEY` (комбинация `NOT NULL` + `UNIQUE`, идентифицирует строку), `FOREIGN KEY` (значение обязано существовать в связанной таблице), `CHECK` (произвольное булево условие на значение), `DEFAULT` (значение по умолчанию, если не указано явно). Ограничения — последний рубеж защиты целостности данных: даже если валидация на фронтенде или бэкенде пропустит некорректные данные из-за бага, БД физически не позволит их сохранить.
@@ -23,6 +45,35 @@ CREATE TABLE products (
   stock INT NOT NULL DEFAULT 0,
   category_id INT,
   FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+);
+```
+
+На практике эти ограничения применяются при проектировании схемы — например, для блога с отношением один-ко-многим (пользователь → статьи) и многие-ко-многим (статьи ↔ теги через промежуточную таблицу):
+
+```sql
+CREATE TABLE users (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE articles (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  title VARCHAR(255) NOT NULL,
+  author_id INT NOT NULL,
+  FOREIGN KEY (author_id) REFERENCES users(id) -- один-ко-многим: у пользователя много статей
+);
+
+CREATE TABLE tags (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(50) UNIQUE NOT NULL
+);
+
+CREATE TABLE article_tags ( -- связующая таблица для многие-ко-многим
+  article_id INT NOT NULL,
+  tag_id INT NOT NULL,
+  PRIMARY KEY (article_id, tag_id),
+  FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE,
+  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
 ```
 
@@ -64,66 +115,7 @@ CREATE TABLE products (
 db.orders.createIndex({ userId: 1, status: 1 });
 ```
 
-## Практика (УМЕЕТ)
-
-### Разрабатывать и реализовывать транзакции с использованием ACID-принципов
-
-Реализация перевода средств между счетами с явной обработкой ошибок и откатом — практическое применение атомарности из раздела ACID выше:
-
-```js
-// Node.js + pg (PostgreSQL)
-async function transferFunds(client, fromId, toId, amount) {
-  try {
-    await client.query('BEGIN');
-    const { rows } = await client.query(
-      'SELECT balance FROM accounts WHERE id = $1 FOR UPDATE', [fromId] // блокировка строки
-    );
-    if (rows[0].balance < amount) throw new Error('Insufficient funds');
-
-    await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [amount, fromId]);
-    await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [amount, toId]);
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK'); // атомарность: откат при любой ошибке
-    throw err;
-  }
-}
-```
-
-### Создавать таблицы, определять структуры данных (столбцы), устанавливать отношения между таблицами, использовать ключи и т. д.
-
-Проектирование схемы для блога с отношением один-ко-многим (пользователь → статьи) и многие-ко-многим (статьи ↔ теги через промежуточную таблицу):
-
-```sql
-CREATE TABLE users (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(100) NOT NULL
-);
-
-CREATE TABLE articles (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  title VARCHAR(255) NOT NULL,
-  author_id INT NOT NULL,
-  FOREIGN KEY (author_id) REFERENCES users(id) -- один-ко-многим: у пользователя много статей
-);
-
-CREATE TABLE tags (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(50) UNIQUE NOT NULL
-);
-
-CREATE TABLE article_tags ( -- связующая таблица для многие-ко-многим
-  article_id INT NOT NULL,
-  tag_id INT NOT NULL,
-  PRIMARY KEY (article_id, tag_id),
-  FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE,
-  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-);
-```
-
-### Выбирать подходящие индексирование в зависимости от типа данных и операций
-
-Для колонки, часто используемой в точном поиске и `JOIN` (`author_id`), подходит обычный B-tree индекс; для колонки, по которой часто ищут диапазоном или сортируют (`created_at`), также используется B-tree; а для полнотекстового поиска по содержимому статьи — специализированный полнотекстовый индекс вместо обычного:
+На практике выбор подходящего индекса зависит от типа данных и операций: для колонки, часто используемой в точном поиске и `JOIN` (`author_id`), подходит обычный B-tree индекс; для колонки, по которой часто ищут диапазоном или сортируют (`created_at`), также используется B-tree; а для полнотекстового поиска по содержимому статьи — специализированный полнотекстовый индекс вместо обычного:
 
 ```sql
 CREATE INDEX idx_articles_author_id ON articles(author_id);      -- ускоряет JOIN и точный поиск

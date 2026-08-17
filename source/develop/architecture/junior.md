@@ -20,6 +20,32 @@ const response = await fetch('https://api.example.com/products');
 const products = await response.json();
 ```
 
+Опираясь на модульную структуру выше — простейшее монолитное frontend-приложение можно спроектировать так, чтобы модули внутри одного репозитория не зависели друг от друга напрямую, а общались через `shared`-слой, что облегчает будущее выделение частей в отдельные сервисы:
+
+```
+project/
+  src/
+    modules/
+      cart/
+        CartPage.tsx
+        cartApi.ts       — обращения к серверу только внутри модуля
+      catalog/
+        CatalogPage.tsx
+        catalogApi.ts
+    shared/
+      httpClient.ts       — единая точка настройки запросов (базовый URL, заголовки)
+    App.tsx                — точка сборки модулей в одно приложение
+```
+
+```ts
+// shared/httpClient.ts — единая точка входа для клиент-серверного взаимодействия
+export async function apiGet<T>(path: string): Promise<T> {
+  const res = await fetch(`/api${path}`);
+  if (!res.ok) throw new Error(`Ошибка запроса: ${res.status}`);
+  return res.json();
+}
+```
+
 ### Общая концепция паттернов MVC (Model-View-Controller) и MVVM (Model-View-ViewModel)
 
 MVC разделяет приложение на три части: Model (данные и бизнес-логика), View (отображение данных пользователю) и Controller (обрабатывает пользовательский ввод, обновляет Model и выбирает View для отображения результата). Такое разделение упрощает независимое тестирование и изменение каждой части. MVVM — эволюция MVC для UI-фреймворков с двухсторонним связыванием данных: View связывается с ViewModel через биндинг (изменения в UI автоматически обновляют ViewModel и наоборот), а ViewModel хранит презентационное состояние и обращается к Model, полностью отделяя View от прямой работы с бизнес-логикой.
@@ -94,34 +120,4 @@ logger.debug('Запрос отправлен', { url: '/api/cart' });
 logger.info('Товар добавлен в корзину');
 logger.warn('Использован устаревший эндпоинт /api/v1/cart');
 logger.error('Не удалось оформить заказ', { orderId: 42 });
-```
-
-## Практика (УМЕЕТ)
-
-### Проектировать простейшие монолитные приложения
-
-Опираясь на модульную структуру из первого раздела — простейшее монолитное frontend-приложение можно спроектировать так, чтобы модули внутри одного репозитория не зависели друг от друга напрямую, а общались через `shared`-слой, что облегчает будущее выделение частей в отдельные сервисы:
-
-```
-project/
-  src/
-    modules/
-      cart/
-        CartPage.tsx
-        cartApi.ts       — обращения к серверу только внутри модуля
-      catalog/
-        CatalogPage.tsx
-        catalogApi.ts
-    shared/
-      httpClient.ts       — единая точка настройки запросов (базовый URL, заголовки)
-    App.tsx                — точка сборки модулей в одно приложение
-```
-
-```ts
-// shared/httpClient.ts — единая точка входа для клиент-серверного взаимодействия
-export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`);
-  if (!res.ok) throw new Error(`Ошибка запроса: ${res.status}`);
-  return res.json();
-}
 ```

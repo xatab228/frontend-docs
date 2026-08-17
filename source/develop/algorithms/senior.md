@@ -50,50 +50,7 @@ function hasCycle(head: ListNode<unknown> | null): boolean {
 }
 ```
 
-### Способы ограничения скорости передачи данных (rate limiting)
-
-Rate limiting — механизм, ограничивающий число операций (запросов к API, событий) за единицу времени, чтобы защитить систему от перегрузки. Основные алгоритмы: fixed window (счётчик сбрасывается в начале каждого фиксированного интервала — просто, но допускает всплеск в 2x лимита на границе окон), sliding window (учитывает скользящее окно времени, точнее fixed window, но сложнее в реализации), token bucket (в "ведро" с фиксированной ёмкостью с постоянной скоростью добавляются токены, каждый запрос тратит токен — допускает всплески до размера ведра при сохранении средней скорости), leaky bucket (запросы попадают в очередь фиксированного размера и обрабатываются с постоянной скоростью — сглаживает всплески, но не пропускает их). Фронтенд-разработчик сталкивается с rate limiting как с клиентской стороны (троттлинг собственных запросов к API, чтобы не словить 429), так и при работе с внешними лимитами.
-
-```ts
-// Простой rate limiter на основе fixed window — для клиентского троттлинга запросов
-class FixedWindowLimiter {
-  private count = 0;
-  private windowStart = Date.now();
-  constructor(private limit: number, private windowMs: number) {}
-
-  allow(): boolean {
-    const now = Date.now();
-    if (now - this.windowStart >= this.windowMs) {
-      this.windowStart = now;
-      this.count = 0;
-    }
-    if (this.count >= this.limit) return false;
-    this.count++;
-    return true;
-  }
-}
-```
-
-### Способы профилирования и анализа производительности
-
-На фронтенде профилирование выполняется несколькими инструментами на разных уровнях: React DevTools Profiler показывает время рендера каждого компонента и причину ре-рендера; вкладка Performance в Chrome DevTools записывает полную временную шкалу (JS execution, layout, paint, composite) и позволяет найти "long tasks", блокирующие главный поток; Lighthouse и Web Vitals (LCP, INP, CLS) дают агрегированные метрики реального пользовательского опыта; `console.time`/`performance.mark` — точечные измерения конкретных участков кода в продакшене.
-
-```ts
-// Точечное профилирование через Performance API
-performance.mark('search-start');
-const results = binarySearch(sortedArr, target);
-performance.mark('search-end');
-performance.measure('search-duration', 'search-start', 'search-end');
-
-const [measure] = performance.getEntriesByName('search-duration');
-console.log(`Поиск занял ${measure.duration.toFixed(2)} ms`);
-```
-
-## Практика (УМЕЕТ)
-
-### Реализовывать операции и алгоритмы для работы с деревьями и списками
-
-Демонстрация полного цикла на прикладной задаче — рендер дерева комментариев с сортировкой по дате, где используются и обход, и вставка из разделов выше:
+Демонстрация полного цикла на прикладной задаче — рендер дерева комментариев с сортировкой по дате, где используются и обход, и вставка из примеров выше:
 
 ```ts
 interface Comment {
@@ -142,9 +99,31 @@ function merge<T>(left: T[], right: T[], compare: (a: T, b: T) => number): T[] {
 }
 ```
 
-### Ограничивать частоту операций простым способом (счетчиком и sleep)
+### Способы ограничения скорости передачи данных (rate limiting)
 
-Простейший rate limiting без сложных алгоритмов из раздела ЗНАЕТ — счётчик с искусственной задержкой между операциями, применимый, например, к последовательной пачке запросов к API, чтобы не превысить лимит провайдера:
+Rate limiting — механизм, ограничивающий число операций (запросов к API, событий) за единицу времени, чтобы защитить систему от перегрузки. Основные алгоритмы: fixed window (счётчик сбрасывается в начале каждого фиксированного интервала — просто, но допускает всплеск в 2x лимита на границе окон), sliding window (учитывает скользящее окно времени, точнее fixed window, но сложнее в реализации), token bucket (в "ведро" с фиксированной ёмкостью с постоянной скоростью добавляются токены, каждый запрос тратит токен — допускает всплески до размера ведра при сохранении средней скорости), leaky bucket (запросы попадают в очередь фиксированного размера и обрабатываются с постоянной скоростью — сглаживает всплески, но не пропускает их). Фронтенд-разработчик сталкивается с rate limiting как с клиентской стороны (троттлинг собственных запросов к API, чтобы не словить 429), так и при работе с внешними лимитами.
+
+```ts
+// Простой rate limiter на основе fixed window — для клиентского троттлинга запросов
+class FixedWindowLimiter {
+  private count = 0;
+  private windowStart = Date.now();
+  constructor(private limit: number, private windowMs: number) {}
+
+  allow(): boolean {
+    const now = Date.now();
+    if (now - this.windowStart >= this.windowMs) {
+      this.windowStart = now;
+      this.count = 0;
+    }
+    if (this.count >= this.limit) return false;
+    this.count++;
+    return true;
+  }
+}
+```
+
+Простейший вариант без сложных алгоритмов — счётчик с искусственной задержкой между операциями, применимый, например, к последовательной пачке запросов к API, чтобы не превысить лимит провайдера:
 
 ```ts
 async function sleep(ms: number): Promise<void> {
@@ -168,7 +147,20 @@ async function processWithSimpleLimit<T>(
 }
 ```
 
-### Проводить анализ производительности алгоритмов
+### Способы профилирования и анализа производительности
+
+На фронтенде профилирование выполняется несколькими инструментами на разных уровнях: React DevTools Profiler показывает время рендера каждого компонента и причину ре-рендера; вкладка Performance в Chrome DevTools записывает полную временную шкалу (JS execution, layout, paint, composite) и позволяет найти "long tasks", блокирующие главный поток; Lighthouse и Web Vitals (LCP, INP, CLS) дают агрегированные метрики реального пользовательского опыта; `console.time`/`performance.mark` — точечные измерения конкретных участков кода в продакшене.
+
+```ts
+// Точечное профилирование через Performance API
+performance.mark('search-start');
+const results = binarySearch(sortedArr, target);
+performance.mark('search-end');
+performance.measure('search-duration', 'search-start', 'search-end');
+
+const [measure] = performance.getEntriesByName('search-duration');
+console.log(`Поиск занял ${measure.duration.toFixed(2)} ms`);
+```
 
 Практический анализ — не просто знание Big O теоретически, а измерение реальной разницы на конкретных данных, чтобы подтвердить или опровергнуть теоретическую оценку:
 

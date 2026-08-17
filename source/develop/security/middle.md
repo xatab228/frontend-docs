@@ -24,6 +24,34 @@ fetch('/api/profile', {
 Authorization: Basic base64(login:password)
 ```
 
+На практике интеграция OAuth 2.0 / OIDC на фронтенде обычно выполняется через готовую библиотеку, реализующую Authorization Code Flow с PKCE (рекомендованный поток для SPA), либо вручную через редиректы:
+
+```js
+// Пример с oidc-client-ts
+import { UserManager } from 'oidc-client-ts';
+
+const userManager = new UserManager({
+  authority: 'https://idp.example.com',
+  client_id: 'frontend-app',
+  redirect_uri: 'https://app.example.com/callback',
+  response_type: 'code', // Authorization Code Flow
+  scope: 'openid profile email',
+});
+
+// Инициировать логин
+async function login() {
+  await userManager.signinRedirect(); // редирект на IdP
+}
+
+// На странице /callback после возврата с IdP
+async function handleCallback() {
+  const user = await userManager.signinRedirectCallback();
+  localStorage.setItem('access_token', user.access_token); // используем полученный JWT
+}
+```
+
+После получения токена он прикладывается ко всем запросам к защищённому API (см. заголовок `Authorization: Bearer` выше), а роли из токена используются для условного рендеринга UI, как показано в разделе про RBAC.
+
 ### Понятие и устройство SSO (Single Sign On) и многофакторной аутентификации
 
 SSO (Single Sign On) — механизм, при котором пользователь один раз проходит аутентификацию в централизованном сервисе (Identity Provider — IdP, например Keycloak, Okta, Azure AD) и получает доступ ко всем связанным приложениям без повторного ввода логина/пароля. Обычно реализуется через протоколы SAML или OpenID Connect: при заходе в приложение (Service Provider) пользователя редиректят на IdP, тот проверяет сессию (или запрашивает логин) и возвращает подписанный токен/утверждение, которое приложение проверяет и создаёт свою локальную сессию. Многофакторная аутентификация (MFA) требует подтверждения личности минимум двумя независимыми факторами из категорий «что-то, что ты знаешь» (пароль), «что-то, что у тебя есть» (одноразовый код из приложения-аутентификатора, SMS) и «что-то, чем ты являешься» (биометрия) — это резко снижает риск компрометации аккаунта даже при утечке пароля.
@@ -86,6 +114,19 @@ async function sha256(text) {
 await sha256('hello'); // "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 ```
 
+На практике SHA применяется, например, для проверки целостности загружаемого на клиенте файла (стороннего скрипта из CDN) через Subresource Integrity:
+
+```html
+<script
+  src="https://cdn.example.com/lib.js"
+  integrity="sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K/uxy9rx7HNQlGYl1kPzQho1wx4JwY8wC"
+  crossorigin="anonymous"
+></script>
+<!-- браузер вычислит SHA-384 файла и сравнит с integrity, откажется исполнять при несовпадении -->
+```
+
+Использование `crypto.subtle.digest` (см. пример SHA-256 выше) для проверки целостности данных на клиенте — например, сравнения хеша загруженного файла перед отправкой на сервер, чтобы избежать повторной загрузки неизменённого контента.
+
 ### Основы работы с сертификатами (SSL/TLS сертификаты)
 
 SSL/TLS-сертификат — часть инфраструктуры открытых ключей (PKI): сервер владеет парой ключей (публичный и приватный), сертификат содержит публичный ключ и подписан удостоверяющим центром. При установлении TLS-соединения (TLS handshake) браузер получает сертификат сервера, проверяет его подпись по цепочке доверия, затем стороны согласуют симметричный сеансовый ключ (через асимметричное шифрование или обмен ключами Diffie-Hellman), которым дальше шифруется весь трафик — асимметричная криптография используется только на этапе установления соединения, так как она значительно медленнее симметричной. Для разработчика важно различать домены сертификата: single-domain, wildcard (`*.example.com`, покрывает все поддомены) и multi-domain (SAN-сертификаты).
@@ -108,39 +149,7 @@ AES (симметричный):  encrypt(data, key) → cipher    decrypt(cipher
 RSA (асимметричный):  encrypt(data, publicKey) → cipher    decrypt(cipher, privateKey) → data
 ```
 
-## Практика (УМЕЕТ)
-
-### Интегрировать существующие системы аутентификации и авторизации в приложения
-
-Интеграция OAuth 2.0 / OIDC на фронтенде обычно выполняется через готовую библиотеку, реализующую Authorization Code Flow с PKCE (рекомендованный поток для SPA), либо вручную через редиректы.
-
-```js
-// Пример с oidc-client-ts
-import { UserManager } from 'oidc-client-ts';
-
-const userManager = new UserManager({
-  authority: 'https://idp.example.com',
-  client_id: 'frontend-app',
-  redirect_uri: 'https://app.example.com/callback',
-  response_type: 'code', // Authorization Code Flow
-  scope: 'openid profile email',
-});
-
-// Инициировать логин
-async function login() {
-  await userManager.signinRedirect(); // редирект на IdP
-}
-
-// На странице /callback после возврата с IdP
-async function handleCallback() {
-  const user = await userManager.signinRedirectCallback();
-  localStorage.setItem('access_token', user.access_token); // используем полученный JWT
-}
-```
-
-После получения токена он прикладывается ко всем запросам к защищённому API (см. заголовок `Authorization: Bearer` из раздела про JWT выше), а роли из токена используются для условного рендеринга UI, как показано в разделе про RBAC.
-
-### Защищать сайт от основных видов атак (XSS, SQL-инъекции)
+### Защита сайта от основных видов атак (XSS, SQL-инъекции)
 
 Защита от XSS на фронтенде строится на том, чтобы никогда не вставлять непроверенный пользовательский ввод в DOM как HTML — использовать безопасные API вместо `innerHTML`, а если разметка всё же нужна — санитизировать её.
 
@@ -171,18 +180,3 @@ db.query(`SELECT * FROM users WHERE email = '${email}'`); // риск SQL-инъ
 // Безопасно: параметризованный запрос
 db.query('SELECT * FROM users WHERE email = $1', [email]);
 ```
-
-### Использовать SHA для хеширования паролей, подписывания данных и проверки целостности информации
-
-Проверка целостности загружаемого на клиенте файла (например, стороннего скрипта из CDN) через Subresource Integrity, которая опирается на SHA-хеш:
-
-```html
-<script
-  src="https://cdn.example.com/lib.js"
-  integrity="sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K/uxy9rx7HNQlGYl1kPzQho1wx4JwY8wC"
-  crossorigin="anonymous"
-></script>
-<!-- браузер вычислит SHA-384 файла и сравнит с integrity, откажется исполнять при несовпадении -->
-```
-
-Использование `crypto.subtle.digest` (см. пример SHA-256 выше) для проверки целостности данных на клиенте — например, сравнения хеша загруженного файла перед отправкой на сервер, чтобы избежать повторной загрузки неизменённого контента.

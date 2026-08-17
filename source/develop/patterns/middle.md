@@ -40,6 +40,34 @@ class FetchHttpClient extends HttpClientBase {
 }
 ```
 
+На практике эти инструменты применяются при проектировании объектно-ориентированных структур данных: возьмём очередь задач с приоритетом, спроектированную с использованием инкапсуляции и явного интерфейса:
+
+```ts
+interface Task {
+  id: string;
+  priority: number;
+  run(): Promise<void>;
+}
+
+class PriorityTaskQueue {
+  #tasks: Task[] = [];
+
+  enqueue(task: Task): void {
+    this.#tasks.push(task);
+    this.#tasks.sort((a, b) => b.priority - a.priority);
+  }
+
+  async runNext(): Promise<void> {
+    const task = this.#tasks.shift();
+    if (task) await task.run();
+  }
+
+  get size(): number {
+    return this.#tasks.length;
+  }
+}
+```
+
 ### Принципы Inversion of Control (IoC), Dependency Injection (DI) и Dependency Lookup
 
 Инверсия управления (IoC) — общий принцип, согласно которому объект не сам создаёт и ищет свои зависимости, а получает их извне, что переворачивает традиционный поток управления. Dependency Injection — конкретная реализация IoC, при которой зависимости передаются объекту явно (через конструктор, свойство или функцию) кем-то извне (контейнером или родительским кодом). Dependency Lookup — альтернативная реализация IoC, при которой объект сам активно запрашивает зависимость у некоего реестра/сервис-локатора по имени или типу, что менее явно и хуже тестируется, чем DI, поскольку скрывает реальные зависимости внутри кода. DI предпочтительнее, так как зависимости видны в сигнатуре конструктора, а значит их легко подменить моками в тестах.
@@ -77,7 +105,7 @@ class LegacyOrderService {
 
 ### Понятия лямбда-функций и каррирования
 
-Лямбда-функция (в JS/TS — стрелочная функция) — это анонимная функция, которую можно определить "на месте" и передать как значение, обычно с более коротким синтаксисом и лексическим связыванием `this`. Каррирование — трансформация функции с несколькими аргументами в последовательность функций, каждая из которых принимает один аргумент и возвращает следующую функцию, пока не будут собраны все аргументы для итогового вычисления. Каррирование полезно для частичного применения — заранее фиксировать часть аргументов и получить переиспользуемую специализированную функцию.
+Лямбда-функция (в JS/TS — стрелочная функция) — это анонимная функция, которую можно определить "на месте" и передать как значение, обычно с более коротким синтаксисом и лексическим связыванием `this`. Каррирование — трансформация функции с несколькими аргументами в последовательность функций, каждая из которых принимает один аргумент и возвращает следующую функцию, пока не будут собраны все аргументы для итогового вычисления. Каррирование полезно для частичного применения — заранее зафиксировать часть аргументов и получить переиспользуемую специализированную функцию.
 
 ```ts
 // лямбда
@@ -125,6 +153,29 @@ class PriceCalculator {
     return this.strategy.apply(price);
   }
 }
+```
+
+Применение этих принципов на практике хорошо видно и на устранении дублирования логики валидации форм (DRY):
+
+```ts
+// нарушение DRY: одинаковая логика повторяется
+function validateEmail(value: string) {
+  if (!value) return 'Обязательное поле';
+  if (!/^\S+@\S+$/.test(value)) return 'Неверный формат';
+}
+function validatePhone(value: string) {
+  if (!value) return 'Обязательное поле';
+  if (!/^\+\d{10,15}$/.test(value)) return 'Неверный формат';
+}
+
+// DRY: общая часть вынесена в комбинатор валидаторов
+const required = (value: string) => (!value ? 'Обязательное поле' : undefined);
+const pattern = (regex: RegExp) => (value: string) => (!regex.test(value) ? 'Неверный формат' : undefined);
+
+const validate = (value: string, rules: Array<(v: string) => string | undefined>) =>
+  rules.reduce<string | undefined>((error, rule) => error ?? rule(value), undefined);
+
+validate('test@mail.com', [required, pattern(/^\S+@\S+$/)]);
 ```
 
 ### Подходы проектирования (TDD, BDD, API First, Code first), их отличия и области применения
@@ -187,66 +238,7 @@ cartTotal.subscribe((total) => console.log(`Обновлена сумма: ${tot
 cartTotal.notify(150);
 ```
 
-## Практика (УМЕЕТ)
-
-### Проектировать и реализовывать объектно-ориентированные структуры данных и методы
-
-На основе примера с `HttpClientBase`/`FetchHttpClient` из раздела про abstract classes/interfaces выше — спроектируем структуру данных для очереди задач с приоритетом, используя инкапсуляцию и явный интерфейс:
-
-```ts
-interface Task {
-  id: string;
-  priority: number;
-  run(): Promise<void>;
-}
-
-class PriorityTaskQueue {
-  #tasks: Task[] = [];
-
-  enqueue(task: Task): void {
-    this.#tasks.push(task);
-    this.#tasks.sort((a, b) => b.priority - a.priority);
-  }
-
-  async runNext(): Promise<void> {
-    const task = this.#tasks.shift();
-    if (task) await task.run();
-  }
-
-  get size(): number {
-    return this.#tasks.length;
-  }
-}
-```
-
-### Применять принципы проектирования на практике
-
-Применение SOLID/DRY/KISS/YAGNI из примера выше — рефакторинг `BadDiscount` в `PriceCalculator` уже демонстрирует SRP, OCP и DIP. Дополнительно проиллюстрируем DRY на устранении дублирования валидации форм:
-
-```ts
-// нарушение DRY: одинаковая логика повторяется
-function validateEmail(value: string) {
-  if (!value) return 'Обязательное поле';
-  if (!/^\S+@\S+$/.test(value)) return 'Неверный формат';
-}
-function validatePhone(value: string) {
-  if (!value) return 'Обязательное поле';
-  if (!/^\+\d{10,15}$/.test(value)) return 'Неверный формат';
-}
-
-// DRY: общая часть вынесена в комбинатор валидаторов
-const required = (value: string) => (!value ? 'Обязательное поле' : undefined);
-const pattern = (regex: RegExp) => (value: string) => (!regex.test(value) ? 'Неверный формат' : undefined);
-
-const validate = (value: string, rules: Array<(v: string) => string | undefined>) =>
-  rules.reduce<string | undefined>((error, rule) => error ?? rule(value), undefined);
-
-validate('test@mail.com', [required, pattern(/^\S+@\S+$/)]);
-```
-
-### Самостоятельно подбирать нужные шаблоны для реализации определенных требований
-
-Требование: нужно логировать события приложения, но состав получателей лога (консоль, Sentry, backend-эндпоинт) должен настраиваться динамически, а сам логгер должен быть один на всё приложение. Комбинируем Singleton (единая точка доступа) + Observer (несколько получателей одного события) поверх примеров выше:
+На практике подбор нужных шаблонов часто требует их комбинирования под конкретное требование. Например: нужно логировать события приложения, но состав получателей лога (консоль, Sentry, backend-эндпоинт) должен настраиваться динамически, а сам логгер должен быть один на всё приложение. Комбинируем Singleton (единая точка доступа) + Observer (несколько получателей одного события) поверх примеров выше:
 
 ```ts
 class AppLogger {

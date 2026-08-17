@@ -27,6 +27,23 @@ server {
 }
 ```
 
+На практике самый частый сценарий с proxy — настройка dev-сервера, чтобы фронтенд обращался к `/api/*` без проблем с CORS, аналогично тому, как это делает production reverse proxy выше.
+
+```js
+// vite.config.js
+export default {
+  server: {
+    proxy: {
+      '/api': {
+        target: 'https://staging-api.example.com',
+        changeOrigin: true,
+        secure: false, // для self-signed сертификатов на staging
+      },
+    },
+  },
+};
+```
+
 ### Общий принцип работы CDN (Content Delivery Network)
 
 CDN — сеть географически распределённых серверов (edge-узлов), кэширующих статический (а иногда и динамический) контент ближе к пользователю. Когда браузер запрашивает файл, DNS CDN направляет запрос на ближайший к пользователю edge-сервер; если файл уже закэширован там — он отдаётся немедленно, если нет — edge-сервер запрашивает его у origin-сервера, кэширует и отдаёт, а последующие запросы других пользователей из того же региона обслуживаются уже из кэша. Для фронтенда это резко снижает время загрузки статических ассетов (JS/CSS/изображения/шрифты) и разгружает origin-сервер. Управление кэшированием на CDN выполняется HTTP-заголовками.
@@ -51,9 +68,36 @@ spec:
   type: ClusterIP
 ```
 
+На практике сборка и запуск Docker-образа выглядят так:
+
+```bash
+docker build -t frontend-app:1.0 .
+docker run --rm -p 3000:80 frontend-app:1.0
+docker images        # посмотреть список собранных образов
+docker logs -f <container_id>   # посмотреть логи запущенного контейнера
+```
+
 ### Архитектура и принципы работы брокеров сообщений (Kafka, RabbitMQ/ActiveMQ)
 
 RabbitMQ/ActiveMQ реализуют классическую модель очередей: продюсер публикует сообщение в exchange, exchange маршрутизирует его в одну или несколько очередей по правилам (direct, topic, fanout), консьюмер читает и подтверждает обработку (ack), после чего сообщение удаляется из очереди — модель хорошо подходит для задач и уведомлений. Kafka устроена иначе: это распределённый лог событий, разбитый на партиции; продюсеры дописывают сообщения в конец партиции, а консьюмеры читают их в своём темпе, при этом сообщение не удаляется после прочтения (оно хранится заданное время и может быть прочитано повторно любым числом независимых консьюмеров) — это делает Kafka удобной для event streaming и восстановления состояния из истории событий. Для фронтенда оба брокера обычно скрыты за backend-сервисом, а до клиента события доходят через WebSocket/SSE-шлюз, который backend поднимает поверх подписки на очередь/топик.
+
+На практике публикация сообщения в RabbitMQ из Node.js-сервиса — типичный случай, когда фронтенд-команда поддерживает свой BFF/edge-сервис:
+
+```js
+import amqp from 'amqplib';
+
+async function sendMessage() {
+  const conn = await amqp.connect('amqp://localhost');
+  const channel = await conn.createChannel();
+  const queue = 'user.events';
+
+  await channel.assertQueue(queue, { durable: true });
+  channel.sendToQueue(queue, Buffer.from(JSON.stringify({ type: 'PAGE_VIEW', userId: 42 })));
+
+  await channel.close();
+  await conn.close();
+}
+```
 
 ### Принципы кеширования для улучшения производительности приложения
 
@@ -78,59 +122,7 @@ async function getProduct(id) {
 }
 ```
 
-## Практика (УМЕЕТ)
-
-### Настраивать Proxy для тестирования API
-
-Наиболее частый сценарий — proxy dev-сервера, чтобы фронтенд обращался к `/api/*` без проблем с CORS, аналогично тому, как это делает production reverse proxy из раздела выше.
-
-```js
-// vite.config.js
-export default {
-  server: {
-    proxy: {
-      '/api': {
-        target: 'https://staging-api.example.com',
-        changeOrigin: true,
-        secure: false, // для self-signed сертификатов на staging
-      },
-    },
-  },
-};
-```
-
-### Создавать и запускать Docker-образы
-
-```bash
-docker build -t frontend-app:1.0 .
-docker run --rm -p 3000:80 frontend-app:1.0
-docker images        # посмотреть список собранных образов
-docker logs -f <container_id>   # посмотреть логи запущенного контейнера
-```
-
-### Подготовить и отправить сообщение через брокер сообщений
-
-Пример публикации сообщения в RabbitMQ из Node.js-сервиса — типичный случай, когда фронтенд-команда поддерживает свой BFF/edge-сервис.
-
-```js
-import amqp from 'amqplib';
-
-async function sendMessage() {
-  const conn = await amqp.connect('amqp://localhost');
-  const channel = await conn.createChannel();
-  const queue = 'user.events';
-
-  await channel.assertQueue(queue, { durable: true });
-  channel.sendToQueue(queue, Buffer.from(JSON.stringify({ type: 'PAGE_VIEW', userId: 42 })));
-
-  await channel.close();
-  await conn.close();
-}
-```
-
-### Работать с инструментами кеширования
-
-Практическая работа с Redis из предыдущего раздела уже демонстрирует базовый паттерн cache-aside (проверить кэш → при промахе сходить в источник → записать в кэш). Дополнить её можно явной инвалидацией при изменении данных:
+Базовый паттерн cache-aside выше (проверить кэш → при промахе сходить в источник → записать в кэш) на практике дополняется явной инвалидацией при изменении данных:
 
 ```js
 async function updateProduct(id, data) {

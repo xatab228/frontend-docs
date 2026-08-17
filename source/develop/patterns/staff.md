@@ -29,6 +29,26 @@ class StandardShipping implements ShippingCost { calculate() { return 300; } }
 class ExpressShipping implements ShippingCost { calculate() { return 900; } }
 ```
 
+Поиск оптимального сочетания архитектурных решений и качественных стандартов хорошо иллюстрируется совместным применением GRASP, Feature Toggles и DI: `Information Expert`/`Pure Fabrication` определяют, кто считает и кто форматирует цену, DI делает шлюз оплаты заменяемым и тестируемым, а feature-флаг обеспечивает безопасный rollout — все три паттерна работают вместе, не дублируя ответственность друг друга:
+
+```ts
+class CheckoutService {
+  constructor(
+    private readonly gateway: PaymentGateway, // DI
+    private readonly flags: FeatureFlags,
+  ) {}
+
+  async checkout(order: Order): Promise<string> {
+    const total = OrderTotalCalculator.total(order); // Information Expert
+    const formatted = PriceFormatter.format(total);  // Pure Fabrication
+    if (this.flags.isEnabled('newPaymentFlow')) {
+      await this.gateway.charge(total);
+    }
+    return formatted;
+  }
+}
+```
+
 ### Как сочетать ООП и ФП в одном проекте
 
 Смешанный подход обычно строится по принципу: неизменяемые данные и чистые функции для трансформации/бизнес-правил (ФП-ядро без побочных эффектов, легко тестируемое), а объекты и классы — для координации побочных эффектов, работы с внешним миром и управления жизненным циклом (I/O, состояние соединения, кэш) — это соответствует архитектуре "functional core, imperative shell". В React-приложениях это выражается так: компоненты и хуки — объектно-подобная модель с жизненным циклом (ООП-грань), а вычисление производных данных внутри них (селекторы, `useMemo` с чистыми функциями) — ФП-грань. Ключевое правило — не смешивать мутацию состояния и чистые вычисления в одной функции: если функция что-то вычисляет, она не должна параллельно писать в БД или менять глобальное состояние.
@@ -51,6 +71,36 @@ class CheckoutController {
   async submit(discountPercent: number): Promise<void> {
     const total = applyDiscount(calculateTotal(this.#items), discountPercent); // чистые вычисления
     await fetch('/api/checkout', { method: 'POST', body: JSON.stringify({ total }) }); // побочный эффект
+  }
+}
+```
+
+Опираясь на этот пример, можно проанализировать производительность кода с точки зрения ООП и внести улучшения: типичная проблема — каждое обращение к `calculateTotal` внутри `CheckoutController` пересчитывает сумму с нуля при каждом рендере React-компонента. Решение — мемоизация чистой функции на уровне компонента и профилирование через `React DevTools Profiler`/Chrome Performance:
+
+```ts
+function CartSummary({ items }: { items: readonly CartItem[] }) {
+  // мемоизация чистой функции ФП-ядра — пересчёт только при реальном изменении items
+  const total = useMemo(() => calculateTotal(items), [items]);
+  return <div>Итого: {total}</div>;
+}
+```
+
+Развивая тот же `CheckoutController`/`functional core, imperative shell` дальше — для проектирования масштабируемых и устойчивых систем на смешанном подходе (ООП+ФП) добавляем изоляцию ошибок сети через паттерн Strategy (взаимозаменяемые платёжные шлюзы) поверх чистого ФП-ядра расчёта:
+
+```ts
+interface PaymentStrategy { pay(amount: number): Promise<void>; }
+class StripeStrategy implements PaymentStrategy {
+  async pay(amount: number) { await fetch('/api/stripe', { method: 'POST', body: String(amount) }); }
+}
+class PaypalStrategy implements PaymentStrategy {
+  async pay(amount: number) { await fetch('/api/paypal', { method: 'POST', body: String(amount) }); }
+}
+
+class ResilientCheckoutController extends CheckoutController {
+  constructor(private strategy: PaymentStrategy) { super(); }
+  override async submit(discountPercent: number): Promise<void> {
+    const total = applyDiscount(calculateTotal((this as any).items ?? []), discountPercent);
+    await this.strategy.pay(total); // ФП-расчёт + заменяемая ООП-стратегия побочного эффекта
   }
 }
 ```
@@ -99,62 +149,4 @@ function createSignal<T>(initial: T) {
 const count = createSignal(0);
 count.subscribe(() => console.log('count changed:', count.get())); // точечное обновление, без ре-рендера всего дерева
 count.set(1);
-```
-
-## Практика (УМЕЕТ)
-
-### Анализировать производительность кода с точки зрения ООП и вносить улучшения для оптимизации работы приложений
-
-Опираясь на пример `functional core, imperative shell` выше — типичная проблема производительности в ООП-коде: каждое обращение к `calculateTotal` внутри `CheckoutController` пересчитывает сумму с нуля при каждом рендере React-компонента. Решение — мемоизация чистой функции на уровне компонента и профилирование через `React DevTools Profiler`/Chrome Performance:
-
-```ts
-function CartSummary({ items }: { items: readonly CartItem[] }) {
-  // мемоизация чистой функции ФП-ядра — пересчёт только при реальном изменении items
-  const total = useMemo(() => calculateTotal(items), [items]);
-  return <div>Итого: {total}</div>;
-}
-```
-
-### Проектировать и разрабатывать масштабируемые и устойчивые системы, используя смешанный подход (ООП+ФП)
-
-Развивая `CheckoutController`/`functional core, imperative shell` из раздела ЗНАЕТ — для устойчивости добавляем изоляцию ошибок сети через паттерн Strategy (взаимозаменяемые платёжные шлюзы) поверх чистого ФП-ядра расчёта:
-
-```ts
-interface PaymentStrategy { pay(amount: number): Promise<void>; }
-class StripeStrategy implements PaymentStrategy {
-  async pay(amount: number) { await fetch('/api/stripe', { method: 'POST', body: String(amount) }); }
-}
-class PaypalStrategy implements PaymentStrategy {
-  async pay(amount: number) { await fetch('/api/paypal', { method: 'POST', body: String(amount) }); }
-}
-
-class ResilientCheckoutController extends CheckoutController {
-  constructor(private strategy: PaymentStrategy) { super(); }
-  override async submit(discountPercent: number): Promise<void> {
-    const total = applyDiscount(calculateTotal((this as any).items ?? []), discountPercent);
-    await this.strategy.pay(total); // ФП-расчёт + заменяемая ООП-стратегия побочного эффекта
-  }
-}
-```
-
-### Находить оптимальное сочетание архитектурных решений и качественных стандартов
-
-Итоговая демонстрация сочетания GRASP + Feature Toggles + DI из предыдущих разделов файла: `Information Expert`/`Pure Fabrication` определяют, кто считает и кто форматирует цену, DI делает шлюз оплаты заменяемым и тестируемым, а feature-флаг обеспечивает безопасный rollout — все три паттерна работают вместе, не дублируя ответственность друг друга:
-
-```ts
-class CheckoutService {
-  constructor(
-    private readonly gateway: PaymentGateway, // DI
-    private readonly flags: FeatureFlags,
-  ) {}
-
-  async checkout(order: Order): Promise<string> {
-    const total = OrderTotalCalculator.total(order); // Information Expert
-    const formatted = PriceFormatter.format(total);  // Pure Fabrication
-    if (this.flags.isEnabled('newPaymentFlow')) {
-      await this.gateway.charge(total);
-    }
-    return formatted;
-  }
-}
 ```

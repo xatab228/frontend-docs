@@ -14,6 +14,25 @@ File           | % Stmts | % Branch | % Funcs | % Lines
 formatDate.ts  |   90.0  |   75.0   |  100.0  |  90.0
 ```
 
+На практике измерение покрытия настраивается через конфигурацию тест-раннера и порогом падения:
+
+```ts
+// vitest.config.ts
+export default defineConfig({
+  test: {
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html'],
+      thresholds: { lines: 80, branches: 70 },
+    },
+  },
+});
+```
+```bash
+npm run test -- --coverage
+open coverage/index.html   # визуальный HTML-отчёт по покрытию
+```
+
 ### Различные подходы к написанию unit-тестов (test doubles, stubbing, mocking)
 
 Test double — общий термин для объекта, подменяющего реальную зависимость в тесте. Основные виды: dummy (объект-заглушка, передаётся, но никогда реально не используется, нужен только чтобы удовлетворить сигнатуру), stub (возвращает заранее заданные ответы на вызовы, не проверяет, как именно его вызывали), mock (как stub, но дополнительно проверяет факт и параметры вызова — использовался ли метод и с какими аргументами), spy (оборачивает реальную функцию, позволяя отслеживать вызовы, сохраняя оригинальное поведение), fake (упрощённая, но рабочая реализация — например, in-memory база данных вместо реальной). Mocking обычно нужен для внешних зависимостей (сетевые запросы, время, случайные числа), stubbing — когда важен только предсказуемый возврат значения, а не факт вызова.
@@ -33,6 +52,52 @@ describe('greetUser', () => {
 
     expect(fetchUser).toHaveBeenCalledWith(42);   // проверка вызова — это mock
     expect(result).toBe('Привет, Анна!');
+  });
+});
+```
+
+На практике эти test double применяются при структурировании целых тестовых наборов через `describe`-блоки и переиспользуемые mock-фабрики:
+
+```ts
+// test/mocks/user.factory.ts
+export const createMockUser = (overrides = {}) => ({
+  id: 1,
+  name: 'Тестовый пользователь',
+  age: 25,
+  ...overrides,
+});
+
+// UserProfile.test.tsx
+describe('UserProfile', () => {
+  describe('когда пользователь совершеннолетний', () => {
+    it('отображает кнопку покупки', () => {
+      const user = createMockUser({ age: 25 });
+      render(<UserProfile user={user} />);
+      expect(screen.getByRole('button', { name: /купить/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('когда пользователь несовершеннолетний', () => {
+    it('скрывает кнопку покупки', () => {
+      const user = createMockUser({ age: 15 });
+      render(<UserProfile user={user} />);
+      expect(screen.queryByRole('button', { name: /купить/i })).not.toBeInTheDocument();
+    });
+  });
+});
+```
+
+Отдельная важная часть написания unit-тестов — создание тестовых сценариев, покрывающих граничные случаи, а не только "счастливый путь":
+
+```ts
+describe('calculateDiscount', () => {
+  it.each([
+    [0, 0],       // граничный случай: нулевая сумма
+    [100, 10],    // обычный случай
+    [-50, 0],     // граничный случай: отрицательная сумма не должна давать скидку
+    [1_000_000, 100_000], // большое значение
+  ])('для суммы %i возвращает скидку %i', (amount, expectedDiscount) => {
+    expect(calculateDiscount(amount)).toBe(expectedDiscount);
   });
 });
 ```
@@ -76,6 +141,18 @@ const DISCOUNT_RATE = 0.87;
 function calculateDiscountedBalance(user: User): number {
   return user.balance * DISCOUNT_RATE;
 }
+```
+
+На практике следование этому принципу означает, в частности, использование понятных и описательных имён переменных, функций и классов:
+
+```ts
+// Плохо
+const d = new Date();
+const u = users.filter(x => x.a);
+
+// Хорошо
+const currentDate = new Date();
+const activeUsers = users.filter(user => user.isActive);
 ```
 
 ### Когда и каким образом использовать комментарии
@@ -126,77 +203,6 @@ interface CreateUserOptions {
 function createUser(options: CreateUserOptions) {}
 ```
 
-## Практика (УМЕЕТ)
-
-### Измерять процент покрытия кода тестами
-
-```bash
-# vitest.config.ts
-```
-```ts
-export default defineConfig({
-  test: {
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'html'],
-      thresholds: { lines: 80, branches: 70 },
-    },
-  },
-});
-```
-```bash
-npm run test -- --coverage
-open coverage/index.html   # визуальный HTML-отчёт по покрытию
-```
-
-### Писать Unit тесты, структурировать тестовые наборы и организовывать mock-объекты для unit-тестов
-
-Структурирование через `describe`-блоки и переиспользуемые mock-фабрики, дополняя пример mocking из раздела выше:
-
-```ts
-// test/mocks/user.factory.ts
-export const createMockUser = (overrides = {}) => ({
-  id: 1,
-  name: 'Тестовый пользователь',
-  age: 25,
-  ...overrides,
-});
-
-// UserProfile.test.tsx
-describe('UserProfile', () => {
-  describe('когда пользователь совершеннолетний', () => {
-    it('отображает кнопку покупки', () => {
-      const user = createMockUser({ age: 25 });
-      render(<UserProfile user={user} />);
-      expect(screen.getByRole('button', { name: /купить/i })).toBeInTheDocument();
-    });
-  });
-
-  describe('когда пользователь несовершеннолетний', () => {
-    it('скрывает кнопку покупки', () => {
-      const user = createMockUser({ age: 15 });
-      render(<UserProfile user={user} />);
-      expect(screen.queryByRole('button', { name: /купить/i })).not.toBeInTheDocument();
-    });
-  });
-});
-```
-
-### Создавать тестовые сценарии для проверки различных условий и граничных случаев
-
-```ts
-describe('calculateDiscount', () => {
-  it.each([
-    [0, 0],       // граничный случай: нулевая сумма
-    [100, 10],    // обычный случай
-    [-50, 0],     // граничный случай: отрицательная сумма не должна давать скидку
-    [1_000_000, 100_000], // большое значение
-  ])('для суммы %i возвращает скидку %i', (amount, expectedDiscount) => {
-    expect(calculateDiscount(amount)).toBe(expectedDiscount);
-  });
-});
-```
-
 ### Применять различные методы контроля качества кода
 
 Комбинация из статического и динамического анализа, описанных выше, в едином npm-скрипте, который также используется в CI:
@@ -237,16 +243,4 @@ TECH-DEBT-234: LegacyOrderForm.tsx использует устаревший Red
 уведомления — это нарушает Single Responsibility. Предлагаю разбить на
 `validateOrder`, `calculateOrderTotal` и `notifyOrderCreated`, так будет
 проще тестировать и переиспользовать логику.
-```
-
-### Следовать лучшим практикам разработки (использование понятных и описательных имен переменных, функций и классов, написание информативных комментариев к коду и др.)
-
-```ts
-// Плохо
-const d = new Date();
-const u = users.filter(x => x.a);
-
-// Хорошо
-const currentDate = new Date();
-const activeUsers = users.filter(user => user.isActive);
 ```

@@ -22,6 +22,25 @@ function parseIdToken(idToken) {
 }
 ```
 
+На практике проектирование SPA-аутентификации строится через Authorization Code Flow с PKCE (см. выше) с учётом безопасного хранения токенов: access token — в памяти (переменная состояния приложения, не `localStorage`, чтобы уменьшить поверхность атаки для XSS), refresh token — в `httpOnly; Secure; SameSite=Strict` cookie, недоступной для JavaScript.
+
+```js
+// Хранение access token в памяти + автоматическое обновление через httpOnly refresh cookie
+let accessToken = null;
+
+async function refreshAccessToken() {
+  const res = await fetch('/api/auth/refresh', {
+    method: 'POST',
+    credentials: 'include', // отправляет httpOnly refresh-cookie автоматически
+  });
+  const data = await res.json();
+  accessToken = data.access_token; // новый короткоживущий access token — только в памяти
+  return accessToken;
+}
+```
+
+Проектирование RBAC/ABAC-модели на бэкенде с проверкой прав middleware'ом на каждый защищённый эндпоинт — фронтенд лишь отражает эти права в UI (см. пример `ProtectedRoute` в middle.md), но не является источником истины для авторизации.
+
 ### Риски безопасности, указанные в OWASP Top 10 (SQL инъекция, XSS, CSRF)
 
 SQL-инъекция — внедрение вредоносного SQL-кода через непроверенный пользовательский ввод, позволяющее читать/изменять/удалять данные в обход бизнес-логики; защита — параметризованные запросы и ORM, никогда не строить запросы конкатенацией строк. XSS (Cross-Site Scripting) — внедрение исполняемого JavaScript в страницу, которую видят другие пользователи; бывает Stored (скрипт сохранён на сервере, например в комментарии), Reflected (скрипт приходит в ответе на конкретный запрос, часто через query-параметр) и DOM-based (уязвимость целиком в клиентском коде, без участия сервера — например, `location.hash` вставляется в `innerHTML`). CSRF (Cross-Site Request Forgery) — атака, при которой злоумышленник заставляет браузер жертвы отправить запрос к другому сайту, используя уже существующие у жертвы cookie-сессии (например, скрытая форма, автоматически отправляющая POST-запрос на банковский сайт); защита — CSRF-токены, проверка заголовка `Origin`/`Referer` и атрибут cookie `SameSite`.
@@ -35,6 +54,8 @@ document.getElementById('greeting').innerHTML = `Привет, ${params.get('nam
 // Защита от CSRF: cookie с SameSite не отправляется при межсайтовых запросах
 // Set-Cookie: session=abc123; SameSite=Strict; Secure; HttpOnly
 ```
+
+Оценка риска обычно строится по формуле «вероятность эксплуатации × потенциальный ущерб», как это делает OWASP Risk Rating Methodology. Например, для найденной DOM-based XSS уязвимости (см. пример выше): вероятность эксплуатации высокая (параметр URL легко подделать и распространить ссылку), ущерб высокий (кража сессионных cookie, полный захват аккаунта жертвы) — итоговый риск критический, требует немедленного фикса, а не постановки в бэклог. Такой анализ оформляется в виде матрицы (severity × likelihood) и используется для приоритизации задач security-бэклога наравне с обычными фичами.
 
 ### Методы контроля безопасности (Access control lists, RBAC, ABAC)
 
@@ -61,6 +82,25 @@ SAST (Static Application Security Testing) — анализ исходного �
   run: npx eslint --plugin security --ext .js,.ts src/
 - name: SonarQube scan
   uses: sonarsource/sonarqube-scan-action@v2
+```
+
+На практике это дополняется настройкой `npm audit`/Snyk в CI для обнаружения известных уязвимостей в зависимостях и ESLint security-плагина для статического анализа кода на уязвимые паттерны:
+
+```bash
+npm audit --audit-level=high    # прервёт CI при уязвимостях high/critical
+npx eslint --ext .ts,.tsx src/  # с eslint-plugin-security подключённым в .eslintrc
+```
+
+```js
+// .eslintrc.js — фрагмент конфигурации
+module.exports = {
+  plugins: ['security'],
+  extends: ['plugin:security/recommended-legacy'],
+  rules: {
+    'security/detect-object-injection': 'warn',
+    'security/detect-eval-with-expression': 'error',
+  },
+};
 ```
 
 ### Расширенные возможности Secure Hash Algorithms (SHA-256, SHA-512)
@@ -93,57 +133,7 @@ Access-Control-Allow-Headers: Content-Type
 Access-Control-Max-Age: 86400
 ```
 
-## Практика (УМЕЕТ)
-
-### Проектировать и внедрять продвинутые механизмы аутентификации и авторизации
-
-Проектирование SPA-аутентификации через Authorization Code Flow с PKCE (см. пример выше) с учётом безопасного хранения токенов: access token — в памяти (переменная состояния приложения, не `localStorage`, чтобы уменьшить поверхность атаки для XSS), refresh token — в `httpOnly; Secure; SameSite=Strict` cookie, недоступной для JavaScript.
-
-```js
-// Хранение access token в памяти + автоматическое обновление через httpOnly refresh cookie
-let accessToken = null;
-
-async function refreshAccessToken() {
-  const res = await fetch('/api/auth/refresh', {
-    method: 'POST',
-    credentials: 'include', // отправляет httpOnly refresh-cookie автоматически
-  });
-  const data = await res.json();
-  accessToken = data.access_token; // новый короткоживущий access token — только в памяти
-  return accessToken;
-}
-```
-
-Проектирование RBAC/ABAC-модели на бэкенде с проверкой прав middleware'ом на каждый защищённый эндпоинт — фронтенд лишь отражает эти права в UI (см. пример `ProtectedRoute` в middle.md), но не является источником истины для авторизации.
-
-### Использовать инструменты для обнаружения базовых уязвимостей в коде
-
-Настройка `npm audit`/Snyk в CI для обнаружения известных уязвимостей в зависимостях и ESLint security-плагина для статического анализа кода на уязвимые паттерны.
-
-```bash
-npm audit --audit-level=high    # прервёт CI при уязвимостях high/critical
-npx eslint --ext .ts,.tsx src/  # с eslint-plugin-security подключённым в .eslintrc
-```
-
-```js
-// .eslintrc.js — фрагмент конфигурации
-module.exports = {
-  plugins: ['security'],
-  extends: ['plugin:security/recommended-legacy'],
-  rules: {
-    'security/detect-object-injection': 'warn',
-    'security/detect-eval-with-expression': 'error',
-  },
-};
-```
-
-### Анализировать и оценивать риски, связанные с уязвимостями, в соответствии с руководствами OWASP
-
-Оценка риска обычно строится по формуле «вероятность эксплуатации × потенциальный ущерб», как это делает OWASP Risk Rating Methodology. Например, для найденной DOM-based XSS уязвимости (см. пример выше): вероятность эксплуатации высокая (параметр URL легко подделать и распространить ссылку), ущерб высокий (кража сессионных cookie, полный захват аккаунта жертвы) — итоговый риск критический, требует немедленного фикса, а не постановки в бэклог. Такой анализ оформляется в виде матрицы (severity × likelihood) и используется для приоритизации задач security-бэклога наравне с обычными фичами.
-
-### Настраивать CORS политики
-
-Настройка CORS на стороне Node.js/Express-бэкенда, обслуживающего фронтенд-приложение, с ограничением до конкретных origin-ов вместо `*`, что обязательно при использовании cookie-based авторизации.
+Настройка CORS на стороне Node.js/Express-бэкенда, обслуживающего фронтенд-приложение, с ограничением до конкретных origin-ов вместо `*`, что обязательно при использовании cookie-based авторизации:
 
 ```js
 const cors = require('cors');

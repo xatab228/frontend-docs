@@ -16,6 +16,20 @@ SOA:      [Service A] ─┐
                  [Order DB]                    [Payment DB]   — у каждого сервиса своя БД
 ```
 
+С точки зрения frontend-разработчика "поддержка" микросервисной архитектуры означает проектирование клиента так, чтобы он не был жёстко привязан к топологии бэкенда — используем единый API Gateway/BFF (Backend for Frontend) как точку входа, скрывающую от клиента, что за ней несколько сервисов:
+
+```ts
+// клиент обращается к единому BFF-эндпоинту, не зная о внутренних микросервисах
+async function loadOrderPage(orderId: string) {
+  const [order, payment, shipping] = await Promise.all([
+    apiGet(`/bff/orders/${orderId}`),
+    apiGet(`/bff/orders/${orderId}/payment`),
+    apiGet(`/bff/orders/${orderId}/shipping`),
+  ]);
+  return { order, payment, shipping };
+}
+```
+
 ### Ключевые нефункциональные требования и показатели качества системы (доступность, отказоустойчивость, безопасность, масштабируемость, задержка, пропускная способность и пр.)
 
 Нефункциональные требования описывают не "что делает" система, а "как хорошо" она это делает. Доступность (availability) — доля времени, когда система работоспособна, часто измеряется в "девятках" (99.9%). Отказоустойчивость (resilience/fault tolerance) — способность продолжать работу (пусть и в ограниченном режиме) при сбое отдельных компонентов. Безопасность — защита данных и функциональности от несанкционированного доступа. Масштабируемость — способность выдерживать растущую нагрузку за счёт добавления ресурсов. Задержка (latency) — время отклика на отдельный запрос. Пропускная способность (throughput) — количество запросов, обрабатываемых системой за единицу времени. На фронтенде эти требования проявляются, например, как Core Web Vitals (LCP, INP, CLS — прокси для "задержки" и воспринимаемой производительности).
@@ -28,6 +42,34 @@ const latency = performance.now() - start;
 if (latency > 1000) {
   reportMetric('slow_api_call', { endpoint: '/api/products', latency });
 }
+```
+
+### Применять на практике хотя бы один паттерн presentation layer
+
+Применяем MVVM из junior.md на практике в реальном Vue-компоненте, где ViewModel инкапсулирует презентационную логику отдельно от Model (данных с сервера):
+
+```vue
+<script setup>
+import { ref, computed, onMounted } from 'vue';
+
+// ViewModel: презентационное состояние + производные данные
+const products = ref([]);
+const search = ref('');
+const filteredProducts = computed(() =>
+  products.value.filter((p) => p.name.toLowerCase().includes(search.value.toLowerCase()))
+);
+
+onMounted(async () => {
+  products.value = await (await fetch('/api/products')).json(); // Model
+});
+</script>
+
+<template>
+  <input v-model="search" placeholder="Поиск..." />
+  <ul>
+    <li v-for="p in filteredProducts" :key="p.id">{{ p.name }}</li>
+  </ul>
+</template>
 ```
 
 ### Основные признаки высоконагруженных (highload) систем (большое количество пользователей, частые операции записи/чтения данных и пр.)
@@ -80,6 +122,18 @@ Sentry.init({
 });
 ```
 
+Практическое применение Sentry — отслеживание пользовательской транзакции с кастомным спаном для замера конкретного участка кода:
+
+```ts
+import * as Sentry from '@sentry/react';
+
+async function checkout(cart: Cart) {
+  return Sentry.startSpan({ name: 'checkout-flow', op: 'ui.action' }, async () => {
+    await submitOrder(cart);
+  });
+}
+```
+
 ### Эффективные инструменты логирования и анализа (например, ElasticSearch, Splunk, Sentry и др.)
 
 Такие инструменты собирают логи из множества источников в единое централизованное хранилище, где их можно искать, фильтровать и агрегировать. ElasticSearch (часто в связке ELK/EFK — ElasticSearch, Logstash/Fluentd, Kibana) — полнотекстовый поисковый движок, широко используемый для хранения и анализа структурированных логов с построением дашбордов в Kibana. Splunk — коммерческая платформа со схожими возможностями и мощной аналитикой/алертингом, часто применяется в enterprise. Sentry специализируется именно на ошибках и производительности приложений — группирует однотипные ошибки, показывает стектрейс с привязкой к исходному коду через source maps, отслеживает частоту повторения проблемы и связывает её с релизами.
@@ -93,69 +147,7 @@ function logEvent(level: 'info' | 'warn' | 'error', message: string, meta: Recor
 logEvent('error', 'Оплата не прошла', { orderId: 42, userId: 'u-1', reason: 'card_declined' });
 ```
 
-## Практика (УМЕЕТ)
-
-### Проектировать и поддерживать SOA и микросервисные приложения
-
-С точки зрения frontend-разработчика "поддержка" микросервисной архитектуры означает проектирование клиента так, чтобы он не был жёстко привязан к топологии бэкенда — используем единый API Gateway/BFF (Backend for Frontend) как точку входа, скрывающую от клиента, что за ней несколько сервисов:
-
-```ts
-// клиент обращается к единому BFF-эндпоинту, не зная о внутренних микросервисах
-async function loadOrderPage(orderId: string) {
-  const [order, payment, shipping] = await Promise.all([
-    apiGet(`/bff/orders/${orderId}`),
-    apiGet(`/bff/orders/${orderId}/payment`),
-    apiGet(`/bff/orders/${orderId}/shipping`),
-  ]);
-  return { order, payment, shipping };
-}
-```
-
-### Применять на практике хотя бы один паттерн presentation layer
-
-Применяем MVVM из первого раздела junior.md на практике в реальном Vue-компоненте, где ViewModel инкапсулирует презентационную логику отдельно от Model (данных с сервера):
-
-```vue
-<script setup>
-import { ref, computed, onMounted } from 'vue';
-
-// ViewModel: презентационное состояние + производные данные
-const products = ref([]);
-const search = ref('');
-const filteredProducts = computed(() =>
-  products.value.filter((p) => p.name.toLowerCase().includes(search.value.toLowerCase()))
-);
-
-onMounted(async () => {
-  products.value = await (await fetch('/api/products')).json(); // Model
-});
-</script>
-
-<template>
-  <input v-model="search" placeholder="Поиск..." />
-  <ul>
-    <li v-for="p in filteredProducts" :key="p.id">{{ p.name }}</li>
-  </ul>
-</template>
-```
-
-### Использовать инструменты наблюдаемости
-
-Практическое применение Sentry из раздела про наблюдаемость выше — отслеживание пользовательской транзакции с кастомным спаном для замера конкретного участка кода:
-
-```ts
-import * as Sentry from '@sentry/react';
-
-async function checkout(cart: Cart) {
-  return Sentry.startSpan({ name: 'checkout-flow', op: 'ui.action' }, async () => {
-    await submitOrder(cart);
-  });
-}
-```
-
-### Интегрировать логирование с системами мониторинга и алертинга
-
-Развивая `logEvent` из раздела про логирование — интегрируем его с Sentry, чтобы ошибки уровня `error` автоматически создавали событие для алертинга, а не просто писались в консоль:
+Развивая `logEvent` выше — интегрируем его с Sentry, чтобы ошибки уровня `error` автоматически создавали событие для алертинга, а не просто писались в консоль:
 
 ```ts
 function logEvent(level: 'info' | 'warn' | 'error', message: string, meta: Record<string, unknown> = {}) {

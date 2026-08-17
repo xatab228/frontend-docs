@@ -17,6 +17,12 @@ product:
   price: 999.99
 ```
 
+Для эндпоинта, отдающего список товаров с ценой и наличием, оптимальна JSON-структура (компактность и нативная поддержка в JS), а не XML/YAML, которые для передачи по сети избыточны или не предназначены:
+
+```json
+{ "products": [{ "id": 1, "name": "Товар", "price": 999.99, "inStock": true }] }
+```
+
 ### Что такое API, особенности версионирования API
 
 API (Application Programming Interface) — контракт, по которому одна программа может обращаться к функциональности другой, не зная деталей её внутренней реализации: набор доступных методов/эндпоинтов, форматов запросов и ответов. Версионирование нужно, чтобы менять API, не ломая уже работающих клиентов (например, старую версию мобильного приложения) — старая версия продолжает работать, пока клиенты не перейдут на новую. Основные способы: версия в URL (`/api/v1/users`), в заголовке (`Accept: application/vnd.api+json;version=2`) или в query-параметре (`?version=2`) — версия в URL самая простая и наглядная, поэтому чаще всего встречается на практике.
@@ -55,6 +61,23 @@ Content-Type: application/json
 { "id": 1, "name": "Товар" }
 ```
 
+На практике основные HTTP-запросы выполняются так:
+
+```js
+await fetch('/api/products/1');                                   // GET
+await fetch('/api/products', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: 'Новый товар', price: 100 }),
+});                                                                 // POST
+await fetch('/api/products/1', {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: 'Товар', price: 150 }),
+});                                                                 // PUT
+await fetch('/api/products/1', { method: 'DELETE' });               // DELETE
+```
+
 ### Архитектурный стиль REST
 
 REST (Representational State Transfer) — стиль проектирования API поверх HTTP, где каждый ресурс (например, пользователь, товар) имеет свой URL, а действия над ним выражаются HTTP-методами: `GET` — получить, `POST` — создать, `PUT`/`PATCH` — обновить, `DELETE` — удалить. Ключевые принципы: statelessness (сервер не хранит состояние клиента между запросами — каждый запрос содержит всю нужную информацию), единообразный интерфейс (ресурсы адресуются URL, представлены обычно в JSON) и использование стандартных HTTP-кодов ответа для обозначения результата.
@@ -65,6 +88,23 @@ GET    /api/products/1      — один товар
 POST   /api/products        — создать товар
 PUT    /api/products/1      — заменить товар целиком
 DELETE /api/products/1      — удалить товар
+```
+
+Пример реализации REST-сервиса и запроса к нему с клиента:
+
+```js
+// простой REST-эндпоинт на Express
+app.get('/api/products/:id', (req, res) => {
+  const product = db.find(req.params.id);
+  if (!product) return res.status(404).json({ error: 'Not found' });
+  res.json(product);
+});
+```
+```js
+// запрос к REST API с клиента
+const res = await fetch('/api/products/1');
+if (!res.ok) throw new Error(`Ошибка ${res.status}`);
+const product = await res.json();
 ```
 
 ### Концепции Stateful и Stateless
@@ -84,52 +124,6 @@ const products = await res.json();
 const socket = new WebSocket('wss://example.com/events');
 socket.onmessage = (event) => console.log('Новое событие:', event.data);
 ```
-
-## Практика (УМЕЕТ)
-
-### Определить структуру передачи данных
-
-Для эндпоинта, отдающего список товаров с ценой и наличием, оптимальна JSON-структура (компактность и нативная поддержка в JS), а не XML/YAML, которые для передачи по сети избыточны или не предназначены:
-
-```json
-{ "products": [{ "id": 1, "name": "Товар", "price": 999.99, "inStock": true }] }
-```
-
-### Писать REST сервисы и делать REST API запросы
-
-```js
-// простой REST-эндпоинт на Express
-app.get('/api/products/:id', (req, res) => {
-  const product = db.find(req.params.id);
-  if (!product) return res.status(404).json({ error: 'Not found' });
-  res.json(product);
-});
-```
-```js
-// запрос к REST API с клиента
-const res = await fetch('/api/products/1');
-if (!res.ok) throw new Error(`Ошибка ${res.status}`);
-const product = await res.json();
-```
-
-### Делать основные HTTP-запросы (GET, POST, PUT, DELETE)
-
-```js
-await fetch('/api/products/1');                                   // GET
-await fetch('/api/products', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ name: 'Новый товар', price: 100 }),
-});                                                                 // POST
-await fetch('/api/products/1', {
-  method: 'PUT',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ name: 'Товар', price: 150 }),
-});                                                                 // PUT
-await fetch('/api/products/1', { method: 'DELETE' });               // DELETE
-```
-
-### Настраивать синхронные вызовы между сервисами
 
 На уровне фронтенда синхронный вызов — это последовательное ожидание ответа перед следующим действием, например при оформлении заказа: сначала дожидаемся подтверждения оплаты, и только затем создаём заказ.
 
