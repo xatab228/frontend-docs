@@ -108,6 +108,37 @@ const userRepo = new Repository<{ id: number; name: string }>();
 userRepo.add({ id: 1, name: 'Alex' });
 ```
 
+### Работа с нативными дженериками (Promise, Array, Map, Record и др.)
+
+Большая часть встроенных типов параметризована: `Array<T>`, `Promise<T>`, `Map<K, V>`, `Set<T>`, `Record<K, V>`, `Partial<T>`. Понимать их нужно раньше, чем писать собственные дженерики — именно с ними сталкиваешься каждый день при типизации асинхронного кода и коллекций.
+
+```ts
+interface User { id: number; name: string }
+
+// Promise<T> — T это то, чем промис РАЗРЕШИТСЯ, а не сама функция
+async function fetchUser(id: number): Promise<User> {
+  const res = await fetch(`/api/users/${id}`)
+  return res.json() as Promise<User>
+}
+
+// await разворачивает Promise<T> → T
+const user: User = await fetchUser(1)
+
+// Promise.all сохраняет типы каждого элемента кортежа
+const [profile, settings] = await Promise.all([fetchUser(1), fetchSettings()])
+// profile: User, settings: Settings
+
+// Коллекции: параметры типа задают и ключ, и значение
+const byId = new Map<number, User>()
+const roles = new Set<'admin' | 'user'>()
+const dictionary: Record<string, number> = { views: 10 }
+
+// Дженерики стримов и наблюдаемых значений устроены так же
+const subject: Observable<User[]> = users$
+```
+
+Типичные ошибки: писать `Promise<any>` вместо конкретного типа (теряется вся проверка после `await`), объявлять `const map = new Map()` без параметров (получается `Map<any, any>`), и указывать возвращаемый тип `User` у `async`-функции — компилятор потребует именно `Promise<User>`.
+
 ### Unknown, void, never; optional (?) и readonly свойства в интерфейсах; union/intersection types
 
 `unknown` требует сужения перед использованием, `void` — отсутствие возвращаемого значения, `never` — недостижимость. В интерфейсах `?` делает поле необязательным, а `readonly` запрещает переприсваивание после инициализации объекта — это помогает моделировать неизменяемые структуры данных. Union и intersection комбинируют типы для описания альтернатив или объединения контрактов.
