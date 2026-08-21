@@ -28,6 +28,7 @@ const frontendLevels = [
   { slug: 'junior', title: 'Junior' },
   { slug: 'middle', title: 'Middle' },
   { slug: 'senior', title: 'Senior' },
+  { slug: 'staff', title: 'Staff' },
 ]
 
 const developLevels = [
